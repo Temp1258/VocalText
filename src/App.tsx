@@ -20,7 +20,6 @@ interface StoredTranscript {
   text: string;
   language: Language;
   timestamp: number;
-  wordCount: number;
 }
 
 const languageOptions: LanguageOption[] = [
@@ -28,16 +27,14 @@ const languageOptions: LanguageOption[] = [
   { code: 'zh-CN', label: 'Chinese', nativeName: '中文' },
 ];
 
-const STORAGE_KEY = 'voice_to_doc_transcripts';
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-const MAX_WORD_COUNT = 88888;
-const MAX_RECORDING_HOURS = 6;
-
 // Define SpeechRecognition for TypeScript
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const recognition = new SpeechRecognition();
 recognition.continuous = true;
 recognition.interimResults = true;
+
+const STORAGE_KEY = 'voice_to_doc_transcripts';
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 function App() {
   const [status, setStatus] = useState<RecordingStatus>('idle');
@@ -47,10 +44,8 @@ function App() {
   const [selectedLanguage, setSelectedLanguage] = useState<Language>('en-US');
   const [showStorage, setShowStorage] = useState(false);
   const [storedTranscripts, setStoredTranscripts] = useState<StoredTranscript[]>([]);
-  const [recordingStartTime, setRecordingStartTime] = useState<number | null>(null);
   
   const recognitionRef = useRef<typeof recognition | null>(null);
-  const transcriptRef = useRef<string>('');
 
   // Load and clean stored transcripts on mount
   useEffect(() => {
@@ -76,25 +71,6 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Check recording duration
-  useEffect(() => {
-    let interval: number;
-    if (status === 'recording' && recordingStartTime) {
-      interval = setInterval(() => {
-        const duration = Date.now() - recordingStartTime;
-        const hours = duration / (1000 * 60 * 60);
-        if (hours >= MAX_RECORDING_HOURS) {
-          handleStopRecording();
-          setError({
-            message: 'Maximum Recording Duration Reached',
-            details: `Recording stopped after ${MAX_RECORDING_HOURS} hours.`
-          });
-        }
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [status, recordingStartTime]);
-
   useEffect(() => {
     if (!SpeechRecognition) {
       setError({
@@ -108,7 +84,7 @@ function App() {
 
     recognition.onresult = (event) => {
       let interim = '';
-      let final = transcriptRef.current;
+      let final = '';
 
       for (let i = 0; i < event.results.length; i++) {
         if (event.results[i].isFinal) {
@@ -118,18 +94,6 @@ function App() {
         }
       }
 
-      // Check word count
-      const wordCount = final.trim().split(/\s+/).length;
-      if (wordCount > MAX_WORD_COUNT) {
-        handleStopRecording();
-        setError({
-          message: 'Maximum Word Count Reached',
-          details: `Recording stopped after reaching ${MAX_WORD_COUNT} words.`
-        });
-        return;
-      }
-
-      transcriptRef.current = final;
       setTranscript(final);
       setInterimTranscript(interim);
     };
@@ -164,8 +128,6 @@ function App() {
       setTranscript('');
       setInterimTranscript('');
       setError(null);
-      transcriptRef.current = '';
-      setRecordingStartTime(Date.now());
       setStatus('recording');
       recognition.start();
     } catch (err) {
@@ -182,17 +144,14 @@ function App() {
     if (recognitionRef.current) {
       recognitionRef.current.stop();
       setStatus('complete');
-      setRecordingStartTime(null);
       
       // Store the transcript
       if (transcript.trim()) {
-        const wordCount = transcript.trim().split(/\s+/).length;
         const newTranscript: StoredTranscript = {
           id: Date.now().toString(),
           text: transcript,
           language: selectedLanguage,
           timestamp: Date.now(),
-          wordCount,
         };
         
         const updatedTranscripts = [...storedTranscripts, newTranscript];
@@ -237,15 +196,6 @@ function App() {
     const hours = Math.floor(remaining / (60 * 60 * 1000));
     const minutes = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
     return `${hours}h ${minutes}m`;
-  };
-
-  const getRecordingDuration = () => {
-    if (!recordingStartTime) return '';
-    const duration = Date.now() - recordingStartTime;
-    const hours = Math.floor(duration / (1000 * 60 * 60));
-    const minutes = Math.floor((duration % (1000 * 60 * 60)) / (1000 * 60));
-    const seconds = Math.floor((duration % (1000 * 60)) / 1000);
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
   return (
@@ -312,9 +262,6 @@ function App() {
                       </span>
                       <span className="ml-2 text-sm text-gray-500">
                         ({stored.language === 'zh-CN' ? '中文' : 'English'})
-                      </span>
-                      <span className="ml-2 text-sm text-gray-500">
-                        ({stored.wordCount.toLocaleString()} words)
                       </span>
                     </div>
                     <div className="flex items-center space-x-4">
@@ -389,15 +336,7 @@ function App() {
               <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 whitespace-nowrap">
                 <span className="text-sm font-medium text-gray-500">
                   {status === 'idle' && 'Click to start recording'}
-                  {status === 'recording' && (
-                    <>
-                      Recording in progress... {getRecordingDuration()}
-                      <br />
-                      <span className="text-xs">
-                        Words: {transcript.trim().split(/\s+/).length.toLocaleString()} / {MAX_WORD_COUNT.toLocaleString()}
-                      </span>
-                    </>
-                  )}
+                  {status === 'recording' && 'Recording in progress...'}
                   {status === 'complete' && 'Recording complete!'}
                   {status === 'error' && 'Recording failed'}
                 </span>
@@ -420,12 +359,7 @@ function App() {
             {status === 'complete' && transcript && (
               <div className="w-full max-w-2xl mt-12">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-gray-900">
-                    Transcript 
-                    <span className="ml-2 text-sm font-normal text-gray-500">
-                      ({transcript.trim().split(/\s+/).length.toLocaleString()} words)
-                    </span>
-                  </h2>
+                  <h2 className="text-lg font-semibold text-gray-900">Transcript</h2>
                   <button
                     onClick={() => handleDownload(transcript, selectedLanguage)}
                     className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
@@ -454,8 +388,6 @@ function App() {
                       <p>4. Your speech will be converted to text in real-time</p>
                       <p>5. Download your transcript when complete</p>
                       <p>6. Access stored transcripts using the archive button</p>
-                      <p>7. Maximum recording time: {MAX_RECORDING_HOURS} hours</p>
-                      <p>8. Maximum words per transcript: {MAX_WORD_COUNT.toLocaleString()}</p>
                     </div>
                   </div>
                 </div>
