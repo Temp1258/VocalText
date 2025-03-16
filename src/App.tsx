@@ -1,12 +1,31 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Mic, MicOff, FileText, Settings, AlertCircle, Download, X } from 'lucide-react';
+import { Mic, MicOff, FileText, Settings, AlertCircle, Download, X, Globe2, Archive } from 'lucide-react';
 
 type RecordingStatus = 'idle' | 'recording' | 'transcribing' | 'complete' | 'error';
+type Language = 'en-US' | 'zh-CN';
 
 interface ErrorState {
   message: string;
   details?: string;
 }
+
+interface LanguageOption {
+  code: Language;
+  label: string;
+  nativeName: string;
+}
+
+interface StoredTranscript {
+  id: string;
+  text: string;
+  language: Language;
+  timestamp: number;
+}
+
+const languageOptions: LanguageOption[] = [
+  { code: 'en-US', label: 'English', nativeName: 'English' },
+  { code: 'zh-CN', label: 'Chinese', nativeName: '中文' },
+];
 
 // Define SpeechRecognition for TypeScript
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -14,13 +33,43 @@ const recognition = new SpeechRecognition();
 recognition.continuous = true;
 recognition.interimResults = true;
 
+const STORAGE_KEY = 'voice_to_doc_transcripts';
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
 function App() {
   const [status, setStatus] = useState<RecordingStatus>('idle');
   const [transcript, setTranscript] = useState<string>('');
   const [error, setError] = useState<ErrorState | null>(null);
   const [interimTranscript, setInterimTranscript] = useState<string>('');
+  const [selectedLanguage, setSelectedLanguage] = useState<Language>('en-US');
+  const [showStorage, setShowStorage] = useState(false);
+  const [storedTranscripts, setStoredTranscripts] = useState<StoredTranscript[]>([]);
   
   const recognitionRef = useRef<typeof recognition | null>(null);
+
+  // Load and clean stored transcripts on mount
+  useEffect(() => {
+    const loadAndCleanTranscripts = () => {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const transcripts: StoredTranscript[] = JSON.parse(stored);
+        const now = Date.now();
+        const validTranscripts = transcripts.filter(t => (now - t.timestamp) < ONE_DAY_MS);
+        
+        if (validTranscripts.length !== transcripts.length) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(validTranscripts));
+        }
+        
+        setStoredTranscripts(validTranscripts);
+      }
+    };
+
+    loadAndCleanTranscripts();
+    // Clean expired transcripts every hour
+    const interval = setInterval(loadAndCleanTranscripts, 60 * 60 * 1000);
+    
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (!SpeechRecognition) {
@@ -31,7 +80,7 @@ function App() {
       return;
     }
 
-    recognition.lang = 'en-US';
+    recognition.lang = selectedLanguage;
 
     recognition.onresult = (event) => {
       let interim = '';
@@ -72,7 +121,7 @@ function App() {
     return () => {
       recognition.stop();
     };
-  }, [status]);
+  }, [status, selectedLanguage]);
   
   const handleStartRecording = async () => {
     try {
@@ -95,15 +144,30 @@ function App() {
     if (recognitionRef.current) {
       recognitionRef.current.stop();
       setStatus('complete');
+      
+      // Store the transcript
+      if (transcript.trim()) {
+        const newTranscript: StoredTranscript = {
+          id: Date.now().toString(),
+          text: transcript,
+          language: selectedLanguage,
+          timestamp: Date.now(),
+        };
+        
+        const updatedTranscripts = [...storedTranscripts, newTranscript];
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedTranscripts));
+        setStoredTranscripts(updatedTranscripts);
+      }
     }
   };
 
-  const handleDownload = () => {
-    const fileBlob = new Blob([transcript], { type: 'text/plain' });
+  const handleDownload = (text: string, lang: Language) => {
+    const fileBlob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(fileBlob);
     const link = document.createElement('a');
+    const langCode = lang === 'zh-CN' ? 'cn' : 'en';
     link.href = url;
-    link.download = `transcript-${new Date().toISOString().split('T')[0]}.txt`;
+    link.download = `transcript-${langCode}-${new Date().toISOString().split('T')[0]}.txt`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -115,6 +179,25 @@ function App() {
     setStatus('idle');
   };
 
+  const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelectedLanguage(e.target.value as Language);
+    if (status === 'recording') {
+      handleStopRecording();
+    }
+  };
+
+  const formatTimestamp = (timestamp: number) => {
+    const date = new Date(timestamp);
+    return date.toLocaleString();
+  };
+
+  const getTimeRemaining = (timestamp: number) => {
+    const remaining = ONE_DAY_MS - (Date.now() - timestamp);
+    const hours = Math.floor(remaining / (60 * 60 * 1000));
+    const minutes = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
+    return `${hours}h ${minutes}m`;
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
       <header className="bg-white shadow-sm">
@@ -123,13 +206,84 @@ function App() {
             <FileText className="h-6 w-6 text-indigo-600" />
             <h1 className="text-xl font-semibold text-gray-900">Voice-to-Doc</h1>
           </div>
-          <button className="p-2 rounded-full hover:bg-gray-100">
-            <Settings className="h-5 w-5 text-gray-600" />
-          </button>
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <Globe2 className="h-5 w-5 text-gray-600" />
+              <select
+                value={selectedLanguage}
+                onChange={handleLanguageChange}
+                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50"
+                disabled={status === 'recording'}
+              >
+                {languageOptions.map((option) => (
+                  <option key={option.code} value={option.code}>
+                    {option.label} ({option.nativeName})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button 
+              onClick={() => setShowStorage(!showStorage)}
+              className="p-2 rounded-full hover:bg-gray-100 relative"
+            >
+              <Archive className="h-5 w-5 text-gray-600" />
+              {storedTranscripts.length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-indigo-600 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
+                  {storedTranscripts.length}
+                </span>
+              )}
+            </button>
+            <button className="p-2 rounded-full hover:bg-gray-100">
+              <Settings className="h-5 w-5 text-gray-600" />
+            </button>
+          </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-12 sm:px-6 lg:px-8">
+        {showStorage && storedTranscripts.length > 0 && (
+          <div className="mb-8 bg-white rounded-2xl shadow-xl p-8">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-semibold text-gray-900">Stored Transcripts</h2>
+              <button
+                onClick={() => setShowStorage(false)}
+                className="text-gray-400 hover:text-gray-500"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              {storedTranscripts.map((stored) => (
+                <div key={stored.id} className="border rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <span className="text-sm font-medium text-gray-900">
+                        {formatTimestamp(stored.timestamp)}
+                      </span>
+                      <span className="ml-2 text-sm text-gray-500">
+                        ({stored.language === 'zh-CN' ? '中文' : 'English'})
+                      </span>
+                    </div>
+                    <div className="flex items-center space-x-4">
+                      <span className="text-sm text-gray-500">
+                        Expires in: {getTimeRemaining(stored.timestamp)}
+                      </span>
+                      <button
+                        onClick={() => handleDownload(stored.text, stored.language)}
+                        className="flex items-center space-x-1 text-indigo-600 hover:text-indigo-700"
+                      >
+                        <Download className="h-4 w-4" />
+                        <span>Download</span>
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-gray-700 line-clamp-2">{stored.text}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <div className="flex flex-col items-center justify-center space-y-8">
             {/* Error Display */}
@@ -207,7 +361,7 @@ function App() {
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-lg font-semibold text-gray-900">Transcript</h2>
                   <button
-                    onClick={handleDownload}
+                    onClick={() => handleDownload(transcript, selectedLanguage)}
                     className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
                   >
                     <Download className="h-4 w-4" />
@@ -228,10 +382,12 @@ function App() {
                   <div className="ml-3">
                     <h3 className="text-sm font-medium text-blue-800">How it works</h3>
                     <div className="mt-2 text-sm text-blue-700">
-                      <p>1. Click the microphone button to start recording your meeting</p>
-                      <p>2. Click again to stop when you're finished</p>
-                      <p>3. Your speech will be converted to text in real-time</p>
-                      <p>4. Download your transcript when complete</p>
+                      <p>1. Select your preferred language (English or Chinese)</p>
+                      <p>2. Click the microphone button to start recording</p>
+                      <p>3. Click again to stop when you're finished</p>
+                      <p>4. Your speech will be converted to text in real-time</p>
+                      <p>5. Download your transcript when complete</p>
+                      <p>6. Access stored transcripts using the archive button</p>
                     </div>
                   </div>
                 </div>
