@@ -1,61 +1,69 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Mic, MicOff, FileText, Settings, AlertCircle, Download, X, Globe2, Archive } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';   //添加useState, useRef, useEffect
+import { Mic, MicOff, FileText, Settings, AlertCircle, Download, X, Globe2, Archive } from 'lucide-react';    //添加图标
 
-type RecordingStatus = 'idle' | 'recording' | 'transcribing' | 'complete' | 'error';
-type Language = 'en-US' | 'zh-CN';
+type RecordingStatus = 'idle' | 'recording' | 'transcribing' | 'complete' | 'error';    //添加RecordingStatus类型
+type Language = 'en-US' | 'zh-CN';    //添加Language类型
 
-interface ErrorState {
+interface ErrorState {    //添加ErrorState接口
   message: string;
   details?: string;
 }
 
-interface LanguageOption {
+interface LanguageOption {    //添加LanguageOption接口
   code: Language;
   label: string;
   nativeName: string;
 }
 
-interface StoredTranscript {
+interface StoredTranscript {    //添加StoredTranscript接口
   id: string;
   text: string;
   language: Language;
   timestamp: number;
 }
 
-const languageOptions: LanguageOption[] = [
+const languageOptions: LanguageOption[] = [   //添加languageOptions
   { code: 'en-US', label: 'English', nativeName: 'English' },
   { code: 'zh-CN', label: 'Chinese', nativeName: '中文' },
 ];
 
 // Define SpeechRecognition for TypeScript
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-const recognition = new SpeechRecognition();
-recognition.continuous = true;
-recognition.interimResults = true;
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;   //添加SpeechRecognition
+const recognition = new SpeechRecognition();    //添加recognition
+recognition.continuous = true;  //添加recognition.continuous
+recognition.interimResults = true;  //添加recognition.interimResults
 
-const STORAGE_KEY = 'voice_to_doc_transcripts';
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const STORAGE_KEY = 'voice_to_doc_transcripts';   //添加STORAGE_KEY
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;  //添加ONE_DAY_MS
 
-function App() {
-  const [status, setStatus] = useState<RecordingStatus>('idle');
-  const [transcript, setTranscript] = useState<string>('');
-  const [error, setError] = useState<ErrorState | null>(null);
-  const [interimTranscript, setInterimTranscript] = useState<string>('');
-  const [selectedLanguage, setSelectedLanguage] = useState<Language>('en-US');
-  const [showStorage, setShowStorage] = useState(false);
-  const [storedTranscripts, setStoredTranscripts] = useState<StoredTranscript[]>([]);
+function App() {  //添加App函数
+  const [status, setStatus] = useState<RecordingStatus>('idle');  //添加status
+  const [transcript, setTranscript] = useState<string>('');   //添加transcript
+  const [error, setError] = useState<ErrorState | null>(null);  //添加error
+  const [interimTranscript, setInterimTranscript] = useState<string>(''); //添加interimTranscript
+  const [selectedLanguage, setSelectedLanguage] = useState<Language>('en-US');  //添加selectedLanguage
+  const [showStorage, setShowStorage] = useState(false);  //添加showStorage
+  const [storedTranscripts, setStoredTranscripts] = useState<StoredTranscript[]>([]); //添加storedTranscripts
   
-  const recognitionRef = useRef<typeof recognition | null>(null);
+  const recognitionRef = useRef<typeof recognition | null>(null); //添加recognitionRef
+
+  // recognitionRef是一个useRef钩子，它存储了recognition对象的引用。这样我们就可以在组件的生命周期内访问recognition对象，而不需要在每次渲染时重新创建它。
+  // useEffect钩子用于在组件挂载时加载和清理存储的转录文本。我们首先从localStorage中加载存储的转录文本，然后过滤掉超过一天的转录文本。
+  // 如果有任何过期的转录文本，我们将更新localStorage并更新组件的状态。
+  // 最后，我们设置一个定时器，每小时清理一次过期的转录文本。
+  // useEffect钩子的返回函数用于清理定时器，以避免内存泄漏。
 
   // Load and clean stored transcripts on mount
-  useEffect(() => {
-    const loadAndCleanTranscripts = () => {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
+  // useeffect钩子用于在组件挂载时加载和清理存储的转录文本
+  useEffect(() => {  //添加useEffect
+    const loadAndCleanTranscripts = () => {   //添加loadAndCleanTranscripts函数
+      const stored = localStorage.getItem(STORAGE_KEY);  //添加stored
+      if (stored) { 
         const transcripts: StoredTranscript[] = JSON.parse(stored);
         const now = Date.now();
         const validTranscripts = transcripts.filter(t => (now - t.timestamp) < ONE_DAY_MS);
         
+        // Update localStorage if any transcripts were removed
         if (validTranscripts.length !== transcripts.length) {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(validTranscripts));
         }
@@ -64,6 +72,7 @@ function App() {
       }
     };
 
+    // Load and clean stored transcripts on mount
     loadAndCleanTranscripts();
     // Clean expired transcripts every hour
     const interval = setInterval(loadAndCleanTranscripts, 60 * 60 * 1000);
